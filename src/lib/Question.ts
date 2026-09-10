@@ -52,6 +52,16 @@ export class Question {
 		return this.parts.length > 1;
 	}
 
+	/** A copy with new content, keeping the original id and creation time. */
+	withContent(question: string, answer: string, topic: string): Question {
+		return new Question({
+			...this.toJSON(),
+			topic: topic.trim(),
+			question: question.trim(),
+			answer: answer.trim()
+		});
+	}
+
 	toJSON(): QuestionJSON {
 		return {
 			id: this.id,

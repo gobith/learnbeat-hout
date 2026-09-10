@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { Question } from '$lib/Question';
 	import type { PageProps } from './$types';
@@ -14,6 +15,10 @@
 	);
 
 	const message = $derived(form && 'message' in form ? form.message : null);
+	const editMessage = $derived(form && 'editMessage' in form ? form.editMessage : null);
+
+	// Which row is open sits in the URL, so editing works without JavaScript too.
+	const editingId = $derived(page.url.searchParams.get('edit'));
 
 	// Without JavaScript the page re-renders after a rejected submit, so we seed the
 	// fields from what came back. With JavaScript the state already holds it.
@@ -38,42 +43,45 @@
 
 <h1>Questions</h1>
 
-<form method="POST" action="?/add" use:enhance={onAdd}>
-	{#if message}
-		<p class="error">{message}</p>
-	{/if}
+<!-- Hidden while a row is open, so there is never a second identical form on screen. -->
+{#if editingId === null}
+	<form method="POST" action="?/add" use:enhance={onAdd}>
+		{#if message}
+			<p class="error">{message}</p>
+		{/if}
 
-	<label>
-		<span>Topic <em>optional</em></span>
-		<input name="topic" bind:value={newTopic} placeholder="e.g. Work preparation" />
-	</label>
+		<label>
+			<span>Topic <em>optional</em></span>
+			<input name="topic" bind:value={newTopic} placeholder="e.g. Work preparation" />
+		</label>
 
-	{#if topics.length > 0}
-		<!-- Chips instead of a <datalist>: a native autocomplete popup renders in the
-		     wrong place inside embedded webviews such as VS Code's Simple Browser. -->
-		<div class="suggestions">
-			{#each topics as suggestion (suggestion)}
-				<button type="button" class="chip" onclick={() => (newTopic = suggestion)}>
-					{suggestion}
-				</button>
-			{/each}
-		</div>
-	{/if}
+		{#if topics.length > 0}
+			<!-- Chips instead of a <datalist>: a native autocomplete popup renders in the
+			     wrong place inside embedded webviews such as VS Code's Simple Browser. -->
+			<div class="suggestions">
+				{#each topics as suggestion (suggestion)}
+					<button type="button" class="chip" onclick={() => (newTopic = suggestion)}>
+						{suggestion}
+					</button>
+				{/each}
+			</div>
+		{/if}
 
-	<label>
-		<span>Question</span>
-		<textarea name="question" rows="2" required bind:value={newQuestion}></textarea>
-	</label>
+		<label>
+			<span>Question</span>
+			<textarea name="question" rows="2" required bind:value={newQuestion}></textarea>
+		</label>
 
-	<label>
-		<span>Answer <em>one part per line</em></span>
-		<textarea name="answer" rows="7" required bind:value={newAnswer}></textarea>
-	</label>
+		<label>
+			<span>Answer <em>one part per line</em></span>
+			<textarea name="answer" rows="7" required bind:value={newAnswer}></textarea>
+		</label>
 
-	<button class="primary">Add</button>
-</form>
+		<button class="primary">Add</button>
+	</form>
+{/if}
 
-<section class="list">
+<section class="list" class:standalone={editingId !== null}>
 	<h2>
 		{questions.length} saved
 		<span class="where">one JSON object per line in <code>data/questions.jsonl</code></span>
@@ -81,26 +89,59 @@
 
 	{#each questions as question (question.id)}
 		<article class="row">
-			<div class="body">
-				{#if question.topic}
-					<p class="topic">{question.topic}</p>
-				{/if}
-				<h3>{question.question}</h3>
-				{#if question.isList}
-					<ol>
-						{#each question.parts as part, i (i)}
-							<li>{part}</li>
-						{/each}
-					</ol>
-				{:else}
-					<p class="answer">{question.answer}</p>
-				{/if}
-			</div>
+			{#if editingId === question.id}
+				<form class="editor" method="POST" action="?/update" use:enhance>
+					<input type="hidden" name="id" value={question.id} />
 
-			<form method="POST" action="?/remove" use:enhance>
-				<input type="hidden" name="id" value={question.id} />
-				<button class="remove" aria-label="Remove this question">&times;</button>
-			</form>
+					{#if editMessage}
+						<p class="error">{editMessage}</p>
+					{/if}
+
+					<label>
+						<span>Topic <em>optional</em></span>
+						<input name="topic" value={question.topic} />
+					</label>
+
+					<label>
+						<span>Question</span>
+						<textarea name="question" rows="2" required value={question.question}></textarea>
+					</label>
+
+					<label>
+						<span>Answer <em>one part per line</em></span>
+						<textarea name="answer" rows="7" required value={question.answer}></textarea>
+					</label>
+
+					<div class="editor-actions">
+						<button class="primary">Save</button>
+						<a class="cancel" href="/questions" data-sveltekit-noscroll>Cancel</a>
+					</div>
+				</form>
+			{:else}
+				<div class="body">
+					{#if question.topic}
+						<p class="topic">{question.topic}</p>
+					{/if}
+					<h3>{question.question}</h3>
+					{#if question.isList}
+						<ol>
+							{#each question.parts as part, i (i)}
+								<li>{part}</li>
+							{/each}
+						</ol>
+					{:else}
+						<p class="answer">{question.answer}</p>
+					{/if}
+				</div>
+
+				<div class="row-actions">
+					<a class="edit" href="?edit={question.id}" data-sveltekit-noscroll>Edit</a>
+					<form method="POST" action="?/remove" use:enhance>
+						<input type="hidden" name="id" value={question.id} />
+						<button class="remove" aria-label="Remove this question">&times;</button>
+					</form>
+				</div>
+			{/if}
 		</article>
 	{/each}
 </section>
@@ -192,6 +233,13 @@
 		padding-top: 1.5rem;
 	}
 
+	/* With the add form hidden there is nothing above to separate from. */
+	.list.standalone {
+		margin-top: 0;
+		border-top: none;
+		padding-top: 0;
+	}
+
 	.list h2 {
 		font-size: 0.9rem;
 		font-weight: 500;
@@ -248,6 +296,41 @@
 		color: var(--muted);
 		font-size: 0.9rem;
 		white-space: pre-line;
+	}
+
+	.row-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.edit {
+		font-size: 0.8rem;
+		color: var(--muted);
+		text-decoration: none;
+		border: 1px solid var(--rule);
+		border-radius: 8px;
+		padding: 0.25rem 0.6rem;
+	}
+
+	.edit:hover {
+		color: var(--timber);
+		border-color: var(--timber);
+	}
+
+	.editor {
+		flex: 1;
+	}
+
+	.editor-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+	}
+
+	.cancel {
+		font-size: 0.85rem;
+		color: var(--muted);
 	}
 
 	.remove {

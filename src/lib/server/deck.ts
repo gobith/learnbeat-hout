@@ -36,11 +36,31 @@ export class Deck {
 		await appendFile(FILE, question.toLine(), 'utf8');
 	}
 
+	/** Replaces one question's content, keeping its place in the file. */
+	static async update(
+		id: string,
+		question: string,
+		answer: string,
+		topic: string
+	): Promise<boolean> {
+		const all = await Deck.all();
+		if (!all.some((item) => item.id === id)) return false;
+
+		await Deck.write(
+			all.map((item) => (item.id === id ? item.withContent(question, answer, topic) : item))
+		);
+		return true;
+	}
+
 	/** Removal can't be done by appending, so we rewrite the file. */
 	static async remove(id: string): Promise<void> {
-		const remaining = await Deck.all();
-		const lines = remaining
-			.filter((question) => question.id !== id)
+		const all = await Deck.all();
+		await Deck.write(all.filter((question) => question.id !== id));
+	}
+
+	/** Writes the whole deck back. Takes newest-first, as `all` returns it. */
+	private static async write(questions: Question[]): Promise<void> {
+		const lines = [...questions]
 			.reverse() // back to oldest-first: the order as stored in the file
 			.map((question) => question.toLine())
 			.join('');
