@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
+	import ImageStrip from '$lib/ImageStrip.svelte';
 	import { Question } from '$lib/Question';
 	import type { PageProps } from './$types';
 
@@ -61,6 +62,9 @@
 
 	/** Clear the question and answer once saved, but keep the topic: you usually
 	    enter several questions on the same subject in a row. */
+	// Bumping this remounts the image strip, which is how its thumbnails clear.
+	let saved = $state(0);
+
 	const onAdd: SubmitFunction = () => {
 		return async ({ result, update }) => {
 			// reset: false — a form reset would wipe the DOM behind the bound state's back.
@@ -68,6 +72,7 @@
 			if (result.type === 'success') {
 				newQuestion = '';
 				newAnswer = '';
+				saved++;
 			}
 		};
 	};
@@ -86,7 +91,7 @@
 </header>
 
 {#if adding && editingId === null}
-	<form class="add" method="POST" action="?/add" use:enhance={onAdd}>
+	<form class="add" method="POST" action="?/add" enctype="multipart/form-data" use:enhance={onAdd}>
 		{#if message}
 			<p class="error">{message}</p>
 		{/if}
@@ -117,6 +122,10 @@
 			<span>Answer <em>one part per line</em></span>
 			<textarea name="answer" rows="7" required bind:value={newAnswer}></textarea>
 		</label>
+
+		{#key saved}
+			<ImageStrip />
+		{/key}
 
 		<button class="button solid">Add</button>
 	</form>
@@ -204,7 +213,13 @@
 						</div>
 					</div>
 				{:else if editingId === question.id}
-					<form class="editor" method="POST" action="?/update" use:enhance>
+					<form
+						class="editor"
+						method="POST"
+						action="?/update"
+						enctype="multipart/form-data"
+						use:enhance
+					>
 						<input type="hidden" name="id" value={question.id} />
 
 						{#if editMessage}
@@ -226,6 +241,8 @@
 							<textarea name="answer" rows="7" required value={question.answer}></textarea>
 						</label>
 
+						<ImageStrip existing={question.images} />
+
 						<div class="editor-actions">
 							<button class="button solid">Save</button>
 							<a class="cancel" href="/questions" data-sveltekit-noscroll>Cancel</a>
@@ -245,6 +262,9 @@
 							{#if question.isList}
 								<span class="parts">{question.parts.length} parts</span>
 							{/if}
+							{#if question.hasImages}
+								<span class="parts">{question.images.length} img</span>
+							{/if}
 						</summary>
 
 						{#if question.isList}
@@ -255,6 +275,14 @@
 							</ol>
 						{:else}
 							<p class="answer">{question.answer}</p>
+						{/if}
+
+						{#if question.hasImages}
+							<div class="shots">
+								{#each question.images as name (name)}
+									<img src="/images/{name}" alt="" />
+								{/each}
+							</div>
 						{/if}
 					</details>
 
@@ -509,6 +537,20 @@
 
 	.entry li {
 		margin-bottom: 0.2rem;
+	}
+
+	.shots {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin: 0.2rem 0 0.7rem 1.4rem;
+	}
+
+	.shots img {
+		max-width: 100%;
+		max-height: 260px;
+		border: 1px solid var(--rule);
+		border-radius: 8px;
 	}
 
 	.answer {

@@ -131,6 +131,14 @@
 					{:else}
 						<p>{question.answer}</p>
 					{/if}
+
+					{#if question.hasImages}
+						<div class="shots">
+							{#each question.images as name (name)}
+								<img src="/images/{name}" alt="" />
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				<div class="buttons">
@@ -280,6 +288,20 @@
 
 	.answer p {
 		margin: 0;
+	}
+
+	.shots {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 1rem;
+	}
+
+	.shots img {
+		max-width: 100%;
+		max-height: 45vh;
+		border: 1px solid var(--rule);
+		border-radius: 8px;
 	}
 
 	.buttons {

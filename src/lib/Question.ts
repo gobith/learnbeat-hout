@@ -5,6 +5,8 @@ export interface QuestionJSON {
 	question: string;
 	answer: string;
 	created: string;
+	/** Absent on text-only questions, to keep the JSONL readable. */
+	images?: string[];
 }
 
 /** A single question with its answer. */
@@ -14,6 +16,7 @@ export class Question {
 	readonly question: string;
 	readonly answer: string;
 	readonly created: Date;
+	readonly images: string[];
 
 	constructor(data: QuestionJSON) {
 		this.id = data.id;
@@ -21,16 +24,18 @@ export class Question {
 		this.question = data.question;
 		this.answer = data.answer;
 		this.created = new Date(data.created);
+		this.images = data.images ?? [];
 	}
 
 	/** Creates a new question with a fresh id and timestamp. */
-	static create(question: string, answer: string, topic = ''): Question {
+	static create(question: string, answer: string, topic = '', images: string[] = []): Question {
 		return new Question({
 			id: crypto.randomUUID(),
 			topic: topic.trim(),
 			question: question.trim(),
 			answer: answer.trim(),
-			created: new Date().toISOString()
+			created: new Date().toISOString(),
+			images
 		});
 	}
 
@@ -52,6 +57,10 @@ export class Question {
 		return this.parts.length > 1;
 	}
 
+	get hasImages(): boolean {
+		return this.images.length > 0;
+	}
+
 	/** Case-insensitive match against topic, question and answer at once. */
 	matches(needle: string): boolean {
 		const trimmed = needle.trim().toLowerCase();
@@ -61,23 +70,29 @@ export class Question {
 	}
 
 	/** A copy with new content, keeping the original id and creation time. */
-	withContent(question: string, answer: string, topic: string): Question {
+	withContent(question: string, answer: string, topic: string, images: string[]): Question {
 		return new Question({
 			...this.toJSON(),
 			topic: topic.trim(),
 			question: question.trim(),
-			answer: answer.trim()
+			answer: answer.trim(),
+			images
 		});
 	}
 
 	toJSON(): QuestionJSON {
-		return {
+		const json: QuestionJSON = {
 			id: this.id,
 			topic: this.topic,
 			question: this.question,
 			answer: this.answer,
 			created: this.created.toISOString()
 		};
+
+		// Left out entirely when there are none, so text-only lines stay short.
+		if (this.images.length > 0) json.images = this.images;
+
+		return json;
 	}
 
 	/** One line for the JSONL file, newline included. */

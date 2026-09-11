@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Question } from '$lib/Question';
+import { ImageStore } from '$lib/server/images';
 
 /** Every question lives in this JSONL file: one complete JSON object per line. */
 const FILE = join(process.cwd(), 'data', 'questions.jsonl');
@@ -36,18 +37,25 @@ export class Deck {
 		await appendFile(FILE, question.toLine(), 'utf8');
 	}
 
+	/** One question by id, or null when it is gone. */
+	static async find(id: string): Promise<Question | null> {
+		const all = await Deck.all();
+		return all.find((question) => question.id === id) ?? null;
+	}
+
 	/** Replaces one question's content, keeping its place in the file. */
 	static async update(
 		id: string,
 		question: string,
 		answer: string,
-		topic: string
+		topic: string,
+		images: string[]
 	): Promise<boolean> {
 		const all = await Deck.all();
 		if (!all.some((item) => item.id === id)) return false;
 
 		await Deck.write(
-			all.map((item) => (item.id === id ? item.withContent(question, answer, topic) : item))
+			all.map((item) => (item.id === id ? item.withContent(question, answer, topic, images) : item))
 		);
 		return true;
 	}
@@ -55,7 +63,12 @@ export class Deck {
 	/** Removal can't be done by appending, so we rewrite the file. */
 	static async remove(id: string): Promise<void> {
 		const all = await Deck.all();
+		const going = all.find((question) => question.id === id);
+
 		await Deck.write(all.filter((question) => question.id !== id));
+
+		// Its images now have nothing pointing at them.
+		for (const name of going?.images ?? []) await ImageStore.remove(name);
 	}
 
 	/** Writes the whole deck back. Takes newest-first, as `all` returns it. */
