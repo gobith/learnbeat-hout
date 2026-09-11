@@ -55,6 +55,8 @@ export const actions: Actions = {
 		if (id === '') return fail(400, { message: 'Unknown question.' });
 
 		await Deck.remove(id);
-		return { removed: true };
+
+		// Drops the ?remove parameter, which closes the confirmation.
+		redirect(303, '/questions');
 	}
 };

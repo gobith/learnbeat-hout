@@ -10,15 +10,47 @@
 
 	const questions = $derived(data.questions.map((json) => new Question(json)));
 
-	const topics = $derived(
-		[...new Set(questions.map((question) => question.topic))].filter((topic) => topic !== '').sort()
-	);
-
 	const message = $derived(form && 'message' in form ? form.message : null);
 	const editMessage = $derived(form && 'editMessage' in form ? form.editMessage : null);
 
-	// Which row is open sits in the URL, so editing works without JavaScript too.
+	// Which row is open, and whether the add form shows, both sit in the URL.
+	// That keeps them working without JavaScript and survives a rejected submit.
 	const editingId = $derived(page.url.searchParams.get('edit'));
+	const removingId = $derived(page.url.searchParams.get('remove'));
+	const adding = $derived(page.url.searchParams.get('add') !== null);
+
+	// Search and filter are view-only, so plain state is enough. A client-side
+	// navigation to ?edit= reuses this component, so both survive opening a row.
+	/** Below this many questions the search box is more clutter than help. */
+	const SEARCH_FROM = 10;
+
+	let query = $state('');
+	let topicFilter = $state<string | null>(null); // null = everything, '' = no topic
+
+	const filtered = $derived(
+		questions.filter(
+			(question) =>
+				(topicFilter === null || question.topic === topicFilter) && question.matches(query)
+		)
+	);
+
+	/** Every topic with how many questions carry it, alphabetically. */
+	const topicCounts = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		for (const question of questions) {
+			if (question.topic === '') continue;
+			counts[question.topic] = (counts[question.topic] ?? 0) + 1;
+		}
+		return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
+	});
+
+	const untagged = $derived(questions.filter((question) => question.topic === '').length);
+	const topics = $derived(topicCounts.map(([topic]) => topic));
+
+	function clearFilters() {
+		query = '';
+		topicFilter = null;
+	}
 
 	// Without JavaScript the page re-renders after a rejected submit, so we seed the
 	// fields from what came back. With JavaScript the state already holds it.
@@ -41,11 +73,20 @@
 	};
 </script>
 
-<h1>Questions</h1>
+<header class="head">
+	<h1>Questions</h1>
 
-<!-- Hidden while a row is open, so there is never a second identical form on screen. -->
-{#if editingId === null}
-	<form method="POST" action="?/add" use:enhance={onAdd}>
+	{#if editingId === null && removingId === null}
+		{#if adding}
+			<a class="button ghost" href="/questions" data-sveltekit-noscroll>Close</a>
+		{:else}
+			<a class="button solid" href="?add" data-sveltekit-noscroll>+ Add question</a>
+		{/if}
+	{/if}
+</header>
+
+{#if adding && editingId === null}
+	<form class="add" method="POST" action="?/add" use:enhance={onAdd}>
 		{#if message}
 			<p class="error">{message}</p>
 		{/if}
@@ -58,7 +99,7 @@
 		{#if topics.length > 0}
 			<!-- Chips instead of a <datalist>: a native autocomplete popup renders in the
 			     wrong place inside embedded webviews such as VS Code's Simple Browser. -->
-			<div class="suggestions">
+			<div class="chips">
 				{#each topics as suggestion (suggestion)}
 					<button type="button" class="chip" onclick={() => (newTopic = suggestion)}>
 						{suggestion}
@@ -77,94 +118,193 @@
 			<textarea name="answer" rows="7" required bind:value={newAnswer}></textarea>
 		</label>
 
-		<button class="primary">Add</button>
+		<button class="button solid">Add</button>
 	</form>
 {/if}
 
-<section class="list" class:standalone={editingId !== null}>
-	<h2>
-		{questions.length} saved
-		<span class="where">one JSON object per line in <code>data/questions.jsonl</code></span>
-	</h2>
+<section class="list">
+	{#if questions.length === 0}
+		<p class="empty">No questions yet. Use <strong>+ Add question</strong> to start.</p>
+	{:else}
+		<!-- Only worth showing once the list stops fitting on one screen. -->
+		{#if questions.length > SEARCH_FROM}
+			<input
+				class="search"
+				type="search"
+				placeholder="Search questions and answers…"
+				bind:value={query}
+				aria-label="Search questions and answers"
+			/>
+		{/if}
 
-	{#each questions as question (question.id)}
-		<article class="row">
-			{#if editingId === question.id}
-				<form class="editor" method="POST" action="?/update" use:enhance>
-					<input type="hidden" name="id" value={question.id} />
+		<div class="chips filters">
+			<button
+				type="button"
+				class="chip"
+				aria-pressed={topicFilter === null}
+				onclick={() => (topicFilter = null)}
+			>
+				All <span class="tally">{questions.length}</span>
+			</button>
 
-					{#if editMessage}
-						<p class="error">{editMessage}</p>
-					{/if}
+			{#each topicCounts as [topic, count] (topic)}
+				<button
+					type="button"
+					class="chip"
+					aria-pressed={topicFilter === topic}
+					onclick={() => (topicFilter = topic)}
+				>
+					{topic} <span class="tally">{count}</span>
+				</button>
+			{/each}
 
-					<label>
-						<span>Topic <em>optional</em></span>
-						<input name="topic" value={question.topic} />
-					</label>
-
-					<label>
-						<span>Question</span>
-						<textarea name="question" rows="2" required value={question.question}></textarea>
-					</label>
-
-					<label>
-						<span>Answer <em>one part per line</em></span>
-						<textarea name="answer" rows="7" required value={question.answer}></textarea>
-					</label>
-
-					<div class="editor-actions">
-						<button class="primary">Save</button>
-						<a class="cancel" href="/questions" data-sveltekit-noscroll>Cancel</a>
-					</div>
-				</form>
-			{:else}
-				<div class="body">
-					{#if question.topic}
-						<p class="topic">{question.topic}</p>
-					{/if}
-					<h3>{question.question}</h3>
-					{#if question.isList}
-						<ol>
-							{#each question.parts as part, i (i)}
-								<li>{part}</li>
-							{/each}
-						</ol>
-					{:else}
-						<p class="answer">{question.answer}</p>
-					{/if}
-				</div>
-
-				<div class="row-actions">
-					<a class="edit" href="?edit={question.id}" data-sveltekit-noscroll>Edit</a>
-					<form method="POST" action="?/remove" use:enhance>
-						<input type="hidden" name="id" value={question.id} />
-						<button class="remove" aria-label="Remove this question">&times;</button>
-					</form>
-				</div>
+			{#if untagged > 0}
+				<button
+					type="button"
+					class="chip"
+					aria-pressed={topicFilter === ''}
+					onclick={() => (topicFilter = '')}
+				>
+					No topic <span class="tally">{untagged}</span>
+				</button>
 			{/if}
-		</article>
-	{/each}
+		</div>
+
+		<p class="meta">
+			{#if filtered.length === questions.length}
+				{questions.length} {questions.length === 1 ? 'question' : 'questions'}
+			{:else}
+				Showing {filtered.length} of {questions.length}
+			{/if}
+			<span class="where">one JSON object per line in <code>data/questions.jsonl</code></span>
+		</p>
+
+		{#if filtered.length === 0}
+			<p class="empty">
+				Nothing matches.
+				<button type="button" class="link" onclick={clearFilters}>Clear search and filter</button>
+			</p>
+		{/if}
+
+		{#each filtered as question (question.id)}
+			<article class="row">
+				{#if removingId === question.id}
+					<div class="confirm">
+						<p class="confirm-text">
+							Delete this question? This cannot be undone.
+							<span class="confirm-target">{question.question}</span>
+						</p>
+
+						<div class="confirm-actions">
+							<form method="POST" action="?/remove" use:enhance>
+								<input type="hidden" name="id" value={question.id} />
+								<button class="button danger">Delete</button>
+							</form>
+							<a class="cancel" href="/questions" data-sveltekit-noscroll>Cancel</a>
+						</div>
+					</div>
+				{:else if editingId === question.id}
+					<form class="editor" method="POST" action="?/update" use:enhance>
+						<input type="hidden" name="id" value={question.id} />
+
+						{#if editMessage}
+							<p class="error">{editMessage}</p>
+						{/if}
+
+						<label>
+							<span>Topic <em>optional</em></span>
+							<input name="topic" value={question.topic} />
+						</label>
+
+						<label>
+							<span>Question</span>
+							<textarea name="question" rows="2" required value={question.question}></textarea>
+						</label>
+
+						<label>
+							<span>Answer <em>one part per line</em></span>
+							<textarea name="answer" rows="7" required value={question.answer}></textarea>
+						</label>
+
+						<div class="editor-actions">
+							<button class="button solid">Save</button>
+							<a class="cancel" href="/questions" data-sveltekit-noscroll>Cancel</a>
+						</div>
+					</form>
+				{:else}
+					<!-- <details> rather than our own open/closed state: it collapses without
+					     JavaScript and is keyboard-operable out of the box. -->
+					<details class="entry">
+						<summary>
+							<span class="summary-text">
+								{#if question.topic}
+									<span class="topic">{question.topic}</span>
+								{/if}
+								{question.question}
+							</span>
+							{#if question.isList}
+								<span class="parts">{question.parts.length} parts</span>
+							{/if}
+						</summary>
+
+						{#if question.isList}
+							<ol>
+								{#each question.parts as part, i (i)}
+									<li>{part}</li>
+								{/each}
+							</ol>
+						{:else}
+							<p class="answer">{question.answer}</p>
+						{/if}
+					</details>
+
+					<div class="row-actions">
+						<a class="action" href="?edit={question.id}" data-sveltekit-noscroll>Edit</a>
+						<!-- A link, not a submit: deleting now goes past a confirmation first. -->
+						<a
+							class="action danger"
+							href="?remove={question.id}"
+							aria-label="Remove this question"
+							data-sveltekit-noscroll
+						>
+							&times;
+						</a>
+					</div>
+				{/if}
+			</article>
+		{/each}
+	{/if}
 </section>
 
 <style>
-	h1 {
-		font-size: 1.5rem;
-		margin: 0 0 1.5rem;
+	.head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1.5rem;
 	}
 
-	form label {
+	h1 {
+		font-size: 1.5rem;
+		margin: 0;
+	}
+
+	/* --- forms --- */
+
+	label {
 		display: block;
 		margin-bottom: 1rem;
 	}
 
-	form label span {
+	label span {
 		display: block;
 		font-size: 0.85rem;
 		font-weight: 500;
 		margin-bottom: 0.35rem;
 	}
 
-	form label em {
+	label em {
 		color: var(--muted);
 		font-weight: 400;
 	}
@@ -194,30 +334,53 @@
 		margin: 0 0 1rem;
 	}
 
-	button {
+	.add {
+		border: 1px solid var(--rule);
+		border-radius: 12px;
+		padding: 1.25rem 1.25rem 0.25rem;
+		margin-bottom: 2rem;
+	}
+
+	/* --- buttons and chips --- */
+
+	.button {
+		font: inherit;
 		font-weight: 500;
 		border-radius: 8px;
 		border: 1px solid transparent;
+		padding: 0.5rem 1.1rem;
+		text-decoration: none;
+		white-space: nowrap;
+		cursor: pointer;
 	}
 
-	.primary {
+	.solid {
 		background: var(--timber);
 		color: var(--paper);
-		padding: 0.65rem 1.5rem;
 	}
 
-	.suggestions {
+	.ghost {
+		background: transparent;
+		border-color: var(--rule);
+		color: var(--muted);
+	}
+
+	.chips {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin: -0.5rem 0 1rem;
 	}
 
+	.filters {
+		margin: 0.6rem 0 1rem;
+	}
+
 	.chip {
 		background: transparent;
-		border-color: var(--rule);
-		color: var(--muted);
+		border: 1px solid var(--rule);
 		border-radius: 999px;
+		color: var(--muted);
 		padding: 0.25rem 0.7rem;
 		font-size: 0.8rem;
 	}
@@ -227,99 +390,199 @@
 		border-color: var(--muted);
 	}
 
-	.list {
-		margin-top: 3rem;
-		border-top: 1px solid var(--rule);
-		padding-top: 1.5rem;
+	.chip[aria-pressed='true'] {
+		background: var(--timber);
+		border-color: var(--timber);
+		color: var(--paper);
 	}
 
-	/* With the add form hidden there is nothing above to separate from. */
-	.list.standalone {
-		margin-top: 0;
-		border-top: none;
-		padding-top: 0;
+	.chip .tally {
+		opacity: 0.6;
+		font-variant-numeric: tabular-nums;
 	}
 
-	.list h2 {
-		font-size: 0.9rem;
-		font-weight: 500;
+	.link {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
 		color: var(--muted);
-		margin: 0 0 1rem;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	/* --- the list --- */
+
+	.search {
+		font-size: 1rem;
+	}
+
+	.meta {
+		font-size: 0.85rem;
+		color: var(--muted);
+		margin: 0 0 0.5rem;
 	}
 
 	.where {
 		display: block;
 		font-size: 0.8rem;
-		font-weight: 400;
-		margin-top: 0.2rem;
+		margin-top: 0.15rem;
 	}
 
 	code {
 		font-size: 0.95em;
 	}
 
+	.empty {
+		color: var(--muted);
+		padding: 1.5rem 0;
+	}
+
 	.row {
 		display: flex;
 		gap: 1rem;
 		align-items: flex-start;
-		padding: 1rem 0;
-		border-bottom: 1px solid var(--rule);
+		padding: 0.6rem 0;
+		border-top: 1px solid var(--rule);
 	}
 
-	.body {
+	.entry {
 		flex: 1;
 		min-width: 0;
 	}
 
+	summary {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+		cursor: pointer;
+		list-style: none;
+		padding: 0.15rem 0;
+	}
+
+	summary::-webkit-details-marker {
+		display: none;
+	}
+
+	summary::before {
+		content: '▸';
+		color: var(--muted);
+		font-size: 0.75em;
+		line-height: 1.6;
+	}
+
+	.entry[open] summary::before {
+		content: '▾';
+	}
+
+	summary:hover .summary-text {
+		color: var(--timber);
+	}
+
+	.summary-text {
+		flex: 1;
+		min-width: 0;
+		font-weight: 500;
+	}
+
 	.topic {
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 		color: var(--timber);
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		margin: 0 0 0.3rem;
+		margin-right: 0.4rem;
+		white-space: nowrap;
 	}
 
-	.row h3 {
-		font-size: 1rem;
-		margin: 0 0 0.5rem;
+	.parts {
+		font-size: 0.75rem;
+		color: var(--muted);
+		white-space: nowrap;
 	}
 
-	.row ol {
-		margin: 0;
-		padding-left: 1.3rem;
+	.entry ol {
+		margin: 0.4rem 0 0.6rem;
+		padding-left: 2.6rem;
 		color: var(--muted);
 		font-size: 0.9rem;
 	}
 
+	.entry li {
+		margin-bottom: 0.2rem;
+	}
+
 	.answer {
-		margin: 0;
+		margin: 0.4rem 0 0.6rem 1.4rem;
 		color: var(--muted);
 		font-size: 0.9rem;
 		white-space: pre-line;
 	}
 
+	/* --- row actions and editor --- */
+
 	.row-actions {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		padding-top: 0.15rem;
 	}
 
-	.edit {
+	.action {
 		font-size: 0.8rem;
+		line-height: 1.5;
 		color: var(--muted);
 		text-decoration: none;
 		border: 1px solid var(--rule);
 		border-radius: 8px;
-		padding: 0.25rem 0.6rem;
+		padding: 0.2rem 0.6rem;
 	}
 
-	.edit:hover {
+	.action:hover {
 		color: var(--timber);
 		border-color: var(--timber);
 	}
 
+	.action.danger:hover {
+		color: var(--red);
+		border-color: var(--red);
+	}
+
+	.button.danger {
+		background: var(--red);
+		color: var(--paper);
+	}
+
+	.confirm {
+		flex: 1;
+		min-width: 0;
+		border: 1px solid var(--red);
+		border-radius: 10px;
+		padding: 0.9rem 1rem;
+		background: color-mix(in srgb, var(--paper) 92%, var(--red));
+	}
+
+	.confirm-text {
+		margin: 0 0 0.85rem;
+		font-size: 0.9rem;
+		color: var(--muted);
+	}
+
+	.confirm-target {
+		display: block;
+		margin-top: 0.25rem;
+		font-weight: 500;
+		color: var(--ink);
+	}
+
+	.confirm-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+	}
+
 	.editor {
 		flex: 1;
+		min-width: 0;
 	}
 
 	.editor-actions {
@@ -331,19 +594,5 @@
 	.cancel {
 		font-size: 0.85rem;
 		color: var(--muted);
-	}
-
-	.remove {
-		background: transparent;
-		border-color: var(--rule);
-		color: var(--muted);
-		font-size: 1.1rem;
-		line-height: 1;
-		padding: 0.25rem 0.55rem;
-	}
-
-	.remove:hover {
-		border-color: var(--red);
-		color: var(--red);
 	}
 </style>

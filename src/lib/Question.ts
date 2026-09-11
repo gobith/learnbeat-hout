@@ -52,6 +52,14 @@ export class Question {
 		return this.parts.length > 1;
 	}
 
+	/** Case-insensitive match against topic, question and answer at once. */
+	matches(needle: string): boolean {
+		const trimmed = needle.trim().toLowerCase();
+		if (trimmed === '') return true;
+
+		return `${this.topic}\n${this.question}\n${this.answer}`.toLowerCase().includes(trimmed);
+	}
+
 	/** A copy with new content, keeping the original id and creation time. */
 	withContent(question: string, answer: string, topic: string): Question {
 		return new Question({
